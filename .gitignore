@@ -1,0 +1,5 @@
+# ignore all files in the build/ directory
+Debug/
+.vs/
+# ignore old backup versions of SL
+*.bak
