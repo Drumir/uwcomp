@@ -17,6 +17,7 @@
 #include "lcd.h"
 
 char str[10];
+uint8_t ch2 = 0b01010101;
 
 int main(void)
 {
@@ -24,14 +25,15 @@ int main(void)
   PORTB = 0b10000000;   // Подтяжка на геркон, BT выключить, ,,,,,,
 
   lcd_init(LCD_DISP_ON);    // init lcd and turn on
-  //lcd_charMode(DOUBLESIZE);
-  for(uint8_t x = 0, y = 0; y < 8; x ++, y ++)
-  {
-    lcd_gotoxy(x,y);
-    lcd_puts("Hello World");
-  }
+	lcd_gotoxy(0, 0);
+	lcd_putsB(" 7.2m");
+	lcd_gotoxy(0, 3);
+	lcd_putsB(" 1:32 ");
+  lcd_charMode(DOUBLESIZE);
+  lcd_gotoxy(0, 6); lcd_puts("15:36 18C");
+	
   /* Replace with your application code */
-  uint8_t contrast = 0;
+//  uint8_t contrast = 0;
   while (1) 
   {/*
     lcd_set_contrast(contrast);
@@ -45,3 +47,5 @@ int main(void)
 }
 
 //--------------------------------------------------------------
+//10.8 28.3C
+//1:45

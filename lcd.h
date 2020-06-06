@@ -123,6 +123,8 @@ extern "C" {
     void lcd_putc(char c);                // print character on screen at TEXTMODE
     // at GRAPHICMODE print character to buffer
     void lcd_charMode(uint8_t mode);            // set size of chars
+		void lcd_putsB(const char* s);
+		void lcd_putcB(char c);
 #if defined GRAPHICMODE
     void lcd_drawPixel(uint8_t x, uint8_t y, uint8_t color);
     void lcd_drawLine(uint8_t x1, uint8_t y1, uint8_t x2, uint8_t y2, uint8_t color);
@@ -135,6 +137,7 @@ extern "C" {
     void lcd_clear_buffer(void); // clear display buffer
     uint8_t lcd_check_buffer(uint8_t x, uint8_t y); // read a pixel value from the display buffer
     void lcd_display_block(uint8_t x, uint8_t line, uint8_t width); // display (part of) a display line
+	// 
 #endif
     
 #ifdef __cplusplus

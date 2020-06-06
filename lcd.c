@@ -48,9 +48,7 @@
 #include "font.h"
 #include <string.h>
 
-#if defined SPI
 #include <util/delay.h>
-#endif
 
 static struct {
     uint8_t x;
@@ -99,7 +97,6 @@ const uint8_t init_sequence [] PROGMEM = {    // Initialization Sequence
     
     
 };
-#pragma mark LCD COMMUNICATION
 void lcd_command(uint8_t cmd[], uint8_t size) {
 	LCD_PORT &= ~(1 << CS_PIN);
 	LCD_PORT &= ~(1 << DC_PIN);
@@ -118,8 +115,6 @@ void lcd_data(uint8_t data[], uint16_t size) {
     }
     LCD_PORT |= (1 << CS_PIN);
 }
-#pragma mark -
-#pragma mark GENERAL FUNCTIONS
 void lcd_init(uint8_t dispAttr){
 	DDRB |= (1 << PB2)|(1 << PB3)|(1 << PB5);
     SPCR = (1 << SPE)|(1<<MSTR)|(1<<SPR0);
@@ -145,11 +140,7 @@ void lcd_goto_xpix_y(uint8_t x, uint8_t y){
     if( x > (DISPLAY_WIDTH) || y > (DISPLAY_HEIGHT/8-1)) return;// out of display
     cursorPosition.x=x;
     cursorPosition.y=y;
-#if defined (SSD1306) || defined (SSD1309)
-    uint8_t commandSequence[] = {0xb0+y, 0x21, x, 0x7f};
-#elif defined SH1106
     uint8_t commandSequence[] = {0xb0+y, 0x21, 0x00+((2+x) & (0x0f)), 0x10+( ((2+x) & (0xf0)) >> 4 ), 0x7f};
-#endif
     lcd_command(commandSequence, sizeof(commandSequence));
 }
 void lcd_clrscr(void){
@@ -297,18 +288,11 @@ void lcd_putc(char c){
                 }
                 lcd_data(data, sizeof(FONT[0])*2);
                 
-#if defined (SSD1306) || defined (SSD1309)
-                uint8_t commandSequence[] = {0xb0+cursorPosition.y+1,
-                    0x21,
-                    cursorPosition.x,
-                    0x7f};
-#elif defined SH1106
                 uint8_t commandSequence[] = {0xb0+cursorPosition.y+1,
                     0x21,
                     0x00+((2+cursorPosition.x) & (0x0f)),
                     0x10+( ((2+cursorPosition.x) & (0xf0)) >> 4 ),
                     0x7f};
-#endif
                 lcd_command(commandSequence, sizeof(commandSequence));
                 
                 for (uint8_t i = 0; i < sizeof(FONT[0]); i++)
@@ -320,12 +304,8 @@ void lcd_putc(char c){
                 lcd_data(data, sizeof(FONT[0])*2);
                 
                 commandSequence[0] = 0xb0+cursorPosition.y;
-#if defined (SSD1306) || defined (SSD1309)
-                commandSequence[2] = cursorPosition.x+(2*sizeof(FONT[0]));
-#elif defined SH1106
                 commandSequence[2] = 0x00+((2+cursorPosition.x+(2*sizeof(FONT[0]))) & (0x0f));
                 commandSequence[3] = 0x10+( ((2+cursorPosition.x+(2*sizeof(FONT[0]))) & (0xf0)) >> 4 );
-#endif
                 lcd_command(commandSequence, sizeof(commandSequence));
                 cursorPosition.x += sizeof(FONT[0])*2;
             } else {
@@ -345,6 +325,28 @@ void lcd_putc(char c){
     }
     
 }
+void lcd_putcB(char c){
+	uint8_t i, x, y, ch[18];
+	x = cursorPosition.x;			// Сохраним положение курсора
+	y = cursorPosition.y;
+	
+	for(i = 0; i < 3; i ++)		// Построчно читаем шрифт символа
+	{
+		lcd_gotoxy(x, y + i);
+		memcpy_P(ch, Font18x24[c-0x10]+(2-i)*18, 18);
+		lcd_data(ch, 18);
+	}
+//	lcd_gotoxy(x + 3, y);
+	cursorPosition.x = x+3;
+	cursorPosition.y = y;
+}
+
+void lcd_putsB(const char* s){
+	while (*s) {
+		lcd_putcB(*s++);
+	}
+}
+
 void lcd_charMode(uint8_t mode){
     charMode = mode;
 }
@@ -360,8 +362,6 @@ void lcd_puts_p(const char* progmem_s){
     }
 }
 #ifdef GRAPHICMODE
-#pragma mark -
-#pragma mark GRAPHIC FUNCTIONS
 void lcd_drawPixel(uint8_t x, uint8_t y, uint8_t color){
     if( x > DISPLAY_WIDTH-1 || y > (DISPLAY_HEIGHT-1)) return; // out of Display
     if( color == WHITE){
@@ -464,15 +464,10 @@ void lcd_drawBitmap(uint8_t x, uint8_t y, const uint8_t *picture, uint8_t width,
     }
 }
 void lcd_display() {
-#if defined (SSD1306) || defined (SSD1309)
-    lcd_gotoxy(0,0);
-    lcd_data(&displayBuffer[0][0], DISPLAY_WIDTH*DISPLAY_HEIGHT/8);
-#elif defined SH1106
     for (uint8_t i = 0; i < DISPLAY_HEIGHT/8; i++){
         lcd_gotoxy(0,i);
         lcd_data(displayBuffer[i], sizeof(displayBuffer[i]));
     }
-#endif
 }
 void lcd_clear_buffer() {
     for (uint8_t i = 0; i < DISPLAY_HEIGHT/8; i++){
@@ -491,4 +486,5 @@ void lcd_display_block(uint8_t x, uint8_t line, uint8_t width) {
     lcd_goto_xpix_y(x,line);
     lcd_data(&displayBuffer[line][x], width);
 }
+
 #endif
