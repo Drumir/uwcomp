@@ -15,22 +15,22 @@
  *
  * Diese Datei ist Teil von lcd library for ssd1306/ssd1309/sh1106 oled-display.
  *
- * lcd library for ssd1306/ssd1309/sh1106 oled-display ist Freie Software: Sie können es unter den Bedingungen
+ * lcd library for ssd1306/ssd1309/sh1106 oled-display ist Freie Software: Sie konnen es unter den Bedingungen
  * der GNU General Public License, wie von der Free Software Foundation,
- * Version 3 der Lizenz oder jeder späteren
- * veröffentlichten Version, weiterverbreiten und/oder modifizieren.
+ * Version 3 der Lizenz oder jeder spateren
+ * veroffentlichten Version, weiterverbreiten und/oder modifizieren.
  *
- * lcd library for ssd1306/ssd1309/sh1106 oled-display wird in der Hoffnung, dass es nützlich sein wird, aber
- * OHNE JEDE GEWÄHRLEISTUNG, bereitgestellt; sogar ohne die implizite
- * Gewährleistung der MARKTFÄHIGKEIT oder EIGNUNG FÜR EINEN BESTIMMTEN ZWECK.
- * Siehe die GNU General Public License für weitere Details.
+ * lcd library for ssd1306/ssd1309/sh1106 oled-display wird in der Hoffnung, dass es nutzlich sein wird, aber
+ * OHNE JEDE GEWAHRLEISTUNG, bereitgestellt; sogar ohne die implizite
+ * Gewahrleistung der MARKTFAHIGKEIT oder EIGNUNG FUR EINEN BESTIMMTEN ZWECK.
+ * Siehe die GNU General Public License fur weitere Details.
  *
  * Sie sollten eine Kopie der GNU General Public License zusammen mit diesem
  * Programm erhalten haben. Wenn nicht, siehe <http://www.gnu.org/licenses/>.
  *
  *  lcd.h
  *
- *  Created by Michael Köhler on 22.12.16.
+ *  Created by Michael Kohler on 22.12.16.
  *  Copyright 2016 Skie-Systems. All rights reserved.
  *
  *  lib for OLED-Display with ssd1306/ssd1309/sh1106-Controller
@@ -327,10 +327,10 @@ void lcd_putc(char c){
 }
 void lcd_putcB(char c){
 	uint8_t i, x, y, ch[18];
-	x = cursorPosition.x;			// Сохраним положение курсора
+	x = cursorPosition.x;			// �������� ��������� �������
 	y = cursorPosition.y;
 	
-	for(i = 0; i < 3; i ++)		// Построчно читаем шрифт символа
+	for(i = 0; i < 3; i ++)		// ��������� ������ ����� ������� (3 ������ ������� 8�������� � ������� 18��������)
 	{
 		lcd_gotoxy(x, y + i);
 		memcpy_P(ch, Font18x24[c-0x10]+(2-i)*18, 18);
