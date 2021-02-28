@@ -38,7 +38,9 @@ int main(void)
 	//rtc_write(0x00, 0b00100010);				// Установка секунд
 	//rtc_write(0x01, 0b00000010);				// Установка минут
 	//rtc_write(0x02, 0b00000000);				// Установка часов
-	//rtc_write(0x0E, 0b01000000);				// Запуск меандра 1 Гц
+  //rtc_set_time(19, 10, 10);
+  rtc_set_date(28, 2, 21);
+	rtc_write(0x0E, 0b01000000);				// Запуск меандра 1 Гц
 
   lcd_init(LCD_DISP_ON);    // init lcd and turn on
 	
@@ -70,23 +72,10 @@ int main(void)
 //1:45
 ISR(INT0_vect) // 
 {
-  uint8_t t = rtc_read(0x02);
-  hour = t&0b00001111;
-  hour += 10*t&0b00010000;
-  hour += 20*t&0b00100000;
+  rtc_get_time(&hour, &min, &sec);
   
-  t = rtc_read(0x01);
-  min = t&0b00001111;
-  min += 10*(t>>4);
+  uint8_t t = rtc_read(0x11); // Чтение температуры RTC
   
-  t = rtc_read(0x00);
-  sec = t&0b00001111;
-  sec += 10*(t>>4);
-  
-  t = rtc_read(0x11); // Чтение температуры RTC
-  
-  sqw ++; if(sqw > 99) sqw = 0;
-
 	//sei();              // 
 	lcd_charMode(DOUBLESIZE);
 	lcd_gotoxy(0, 6);
@@ -99,5 +88,7 @@ ISR(INT0_vect) //
 	lcd_putc('0' + t/10);
 	lcd_putc('0' + t%10);
 	lcd_putc('C');
+  t = rtc_read(0x03); // Чтение дня недели
+	lcd_putc('0' + t);
 	return;
 }

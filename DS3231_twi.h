@@ -54,9 +54,9 @@ void rtc_set_time(unsigned char hour,unsigned char min,unsigned char sec)
 	twi_start();
 	twi_write(0xd0);
 	twi_write(0);
-	twi_write(sec);
-	twi_write(min);
-	twi_write(hour);
+	twi_write(((sec/10) << 4) + (sec%10));
+	twi_write(((min/10) << 4) + (min%10));
+	twi_write(((hour/10) << 4) + (hour%10));
 	twi_stop();
 }
 
@@ -65,23 +65,28 @@ void rtc_set_date(unsigned char date,unsigned char month,unsigned char year)
 	twi_start();
 	twi_write(0xd0);
 	twi_write(4);
-	twi_write(date);
-	twi_write(month);
-	twi_write(year);
+	twi_write(((date/10) << 4) + (date%10));
+	twi_write((((month/10) << 4) + (month%10)) | 0b1000000);
+	twi_write(((year/10) << 4) + (year%10));
 	twi_stop();
 }
 
 void rtc_get_time(unsigned char *hour,unsigned char *min,unsigned char *sec)
 {
-	twi_start();
+	uint8_t t;
+  twi_start();
 	twi_write(0xd0);
 	twi_write(0);
 	twi_start();
 	twi_write(0xd1);
-	*sec=twi_read(1);
-	*min=twi_read(1);
-	*hour=twi_read(0);
-	twi_stop();
+
+  t = twi_read(1);
+  *sec = (t&0b00001111) + 10*(t>>4);
+  t = twi_read(1);
+  *min = (t&0b00001111) + 10*(t>>4);
+  t = twi_read(0);
+  *hour = (t&0b00001111) + 10*((t&0b00110000)>>4);
+ 	twi_stop();
 }
 
 void rtc_get_date(unsigned char *date,unsigned char *month,unsigned char *year)
