@@ -5,10 +5,10 @@
  *  Author: pac-admin
  */ 
 
-
 #ifndef DS3231_TWI_H_
 #define DS3231_TWI_H_
 
+#include "global.h"
 
 #define TWEN    2
 #define TWIE    0
