@@ -23,23 +23,24 @@ void measurePressure(void);
 
 
 char str[10];
-uint8_t ch2 = 0b01010101;
+//uint8_t ch2 = 0b01010101;
 uint8_t Sec, Min_1, Min_10, Hours_1, Hours_10;
-uint8_t hour, min, sec;
+uint8_t hour, min, sec, contrast;
 uint16_t sqw, Vbat, Pressure;
 
 int main(void)
 {
-  DDRB  = 0b01101111;		//KeyLeft, EnBT, SCK, MISO, MOSI, LCD_CSE, LCD_DC, LCD_RESET
+  DDRB  = 0b01101111;		//KeyRight, EnBT, SCK, MISO, MOSI, LCD_CSE, LCD_DC, LCD_RESET
   PORTB = 0b10000000;   // Подтяжка на геркон, BT выключить, ,,,,,,
 	
-	DDRD = 0b00000000;			// ,,,,,,1s int, 
+	DDRD  = 0b10000010;			// BTrst, KeyUp, KeyLeft, DS18B20, INT1(Keys), INT0, TX, RX
+	PORTD = 0b01101000;			// 
   
   DDRC  = 0b00000001;   // ,,,,,,,Enable 5V
 	PORTC = 0b00000001;   //
   
-	EICRA |= (1<<ISC01) | (1<<ISC00); // The rising edge of INT0 generates an interrupt request
-	EIMSK |= (1<<INT0); // External Interrupt Request 0 Enable
+	EICRA |= (1<<ISC01) | (0<<ISC00) | (1<<ISC11) | (0<<ISC10); // The rising edge of INT0 and INT1 generates an interrupt request
+	EIMSK |= (1<<INT0) | (1<<INT1); // INT0 Enable, INT1 Enable
 
   /* Инициализация АЦП */
   //         АЦП En,    not now,  single mode, reset iflag, INTs Disable,       предделитель частоты
@@ -53,8 +54,10 @@ int main(void)
 	rtc_write(0x0E, 0b01000000);				// Запуск меандра 1 Гц
   
   Vbat = 1111;
+  contrast = 127;
 
   lcd_init(LCD_DISP_ON);    // init lcd and turn on
+  lcd_set_contrast(contrast);
 	/*
 	lcd_gotoxy(0, 0);
 	lcd_putsB(" 4.21m ");
@@ -69,14 +72,8 @@ int main(void)
 //  uint8_t contrast = 0;
   while (1) 
   {
-    sensor_write(0x44);   // старт измерения температуры
-    _delay_ms(1000);
-    uint16_t Temp = sensor_write(0xBE); // чтение температурных данных c dc18_B_20 / dc18_S_20
-    itoa(Temp/16, str, 10);
-  	lcd_gotoxy(0, 3);
+  	lcd_gotoxy(2, 3);
 //	  lcd_putsB("");
-	  lcd_putsB(str);
-	  lcd_putsB("C ");
     measureBattery();
     itoa(Vbat, str, 10);
     lcd_putsB(str);
@@ -86,24 +83,23 @@ int main(void)
     lcd_gotoxy(0, 0);
     lcd_putsB(str);
     lcd_putsB("KPa ");
-    
 
-
-    /*
+/*    
     lcd_set_contrast(contrast);
     itoa((int)contrast, str, 10);
     strcat(str, "   ");
     lcd_gotoxy(0,2);          // set cursor to first column at line 3
     lcd_puts(str);  // puts string form flash to display (TEXTMODE) or buffer (GRAPHICMODE)
     _delay_ms(100);
-    contrast ++;*/
+    contrast ++;
+*/
   }
 }
 
 //--------------------------------------------------------------
 //10.8 28.3C
 //1:45
-ISR(INT0_vect) // 
+ISR(INT0_vect)                    // Ежесекундное прерывание от RTC
 {
   rtc_get_time(&hour, &min, &sec);
   
@@ -121,9 +117,45 @@ ISR(INT0_vect) //
 	lcd_putc('0' + t/10);
 	lcd_putc('0' + t%10);
 	lcd_putc('C');
+  
+  if(sec%2 == 0)
+    sensor_write(0x44);   // старт измерения температуры
+  else{
+    uint16_t Temp = sensor_write(0xBE); // чтение температурных данных c dc18_B_20 / dc18_S_20
+    itoa(Temp/16, str, 10);
+  	lcd_gotoxy(0, 3);
+	  lcd_putsB(str);
+	  lcd_putsB("C ");
+  }        
 	return;
 }
 //------------------------------------------------------------------------------
+
+ISR(INT1_vect)                  // Прерывание от кнопок
+{
+	lcd_gotoxy(0, 6);
+  lcd_puts("KEY ");
+  if((PINB & 0b10000000) == 0)            // Key RIGHT
+  {
+    lcd_puts("RIGHT");
+  }
+  else if((PIND & 0b01000000) == 0)       // Key UP
+  {
+    lcd_puts("UP");
+  }
+  else if((PIND & 0b00100000) == 0)       // Key LEFT
+  {
+    lcd_puts("LEFT");
+  }
+  else                                // Key DOWN
+  {
+    //itoa(PIND, str, 2);
+    lcd_puts("DOWN");
+  }    
+	return;
+}
+//------------------------------------------------------------------------------
+
 ISR(ADC_vect)          // Завершение преобразования АЦП
 {
   //Vbat = ADC;		// Преобразуем условные единицы в вольты
