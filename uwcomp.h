@@ -9,7 +9,10 @@
 #ifndef UWCOMP_H_
 #define UWCOMP_H_
 
-
+#define M_MENU    0
+#define M_DEEP    1
+#define M_SURFACE 2
+#define M_AIR     3
 
 
 

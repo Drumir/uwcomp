@@ -24,22 +24,25 @@ void measurePressure(void);
 
 char str[10];
 //uint8_t ch2 = 0b01010101;
-uint8_t Sec, Min_1, Min_10, Hours_1, Hours_10;
+uint8_t Mode;
 uint8_t hour, min, sec, contrast;
 uint16_t sqw, Vbat, Pressure;
 
 int main(void)
 {
-  DDRB  = 0b01101111;		//KeyRight, EnBT, SCK, MISO, MOSI, LCD_CSE, LCD_DC, LCD_RESET
-  PORTB = 0b10000000;   // Подтяжка на геркон, BT выключить, ,,,,,,
+  Mode = M_MENU;
+  DDRB  = 0b01101111;		//KeyRight, BT, SCK, MISO, MOSI, LCD_CSE, LCD_DC, LCD_RESET
+  PORTB = 0b11000000;   // Подтяжка на геркон, BT(0-on/1-off), ,,,,,,
 	
 	DDRD  = 0b10000010;			// BTrst, KeyUp, KeyLeft, DS18B20, INT1(Keys), INT0, TX, RX
 	PORTD = 0b01101000;			// 
   
-  DDRC  = 0b00000001;   // ,,,,,,,Enable 5V
-	PORTC = 0b00000001;   //
+  DDRC  = 0b00000001;   // ,,,,,,,5V
+	PORTC = 0b00000000;   //,,,,,,,5v(0-on/1-off)
   
-	EICRA |= (1<<ISC01) | (0<<ISC00) | (1<<ISC11) | (0<<ISC10); // The rising edge of INT0 and INT1 generates an interrupt request
+  ACSR |= 0b10000000; // Выключим аналоговый компаратор
+  
+ 	EICRA |= (1<<ISC01) | (0<<ISC00) | (1<<ISC11) | (0<<ISC10); // The rising edge of INT0 and INT1 generates an interrupt request
 	EIMSK |= (1<<INT0) | (1<<INT1); // INT0 Enable, INT1 Enable
 
   /* Инициализация АЦП */
@@ -49,7 +52,7 @@ int main(void)
   ADMUX  = 0b11000111;		// 11 - Опорное напряжение = 1.1В, 0 - выравнивание вправо, 0 - резерв, 0 - резерв, 000 - выбор канала ADC7
   ADCSRA |= 1<<ADSC;		// Старт пробного мусорного преобразования
 
-  rtc_set_time(0, 45, 6);
+  //rtc_set_time(21, 41, 6);
   //rtc_set_date(28, 2, 21);
 	rtc_write(0x0E, 0b01000000);				// Запуск меандра 1 Гц
   
@@ -71,18 +74,28 @@ int main(void)
   /* Replace with your application code */
 //  uint8_t contrast = 0;
   while (1) 
-  {
-  	lcd_gotoxy(2, 3);
-//	  lcd_putsB("");
+  {/*
+    PORTB |= 0b01000000;
+    PORTC |= 0b00000001;
+    _delay_ms(2000);
+    PORTB &= 0b10111111;
+    PORTC &= 0b11111110;
+    _delay_ms(2000);
+    */
+    lcd_gotoxy(2, 3);
     measureBattery();
     itoa(Vbat, str, 10);
     lcd_putsB(str);
+    
     //lcd_putsB(" ");
+    
+  	lcd_charMode(DOUBLESIZE);
     measurePressure();
     itoa(Pressure, str, 10);
     lcd_gotoxy(0, 0);
     lcd_putsB(str);
-    lcd_putsB("KPa ");
+    lcd_putsB("KPa");
+    _delay_ms(50);
 
 /*    
     lcd_set_contrast(contrast);
@@ -178,6 +191,7 @@ void measurePressure(void)
   while (ADCSRA & 0x40);		// Ждем завершения(сброса флага ADSC в 0)
   uint32_t vLongPress = ADC;
   vLongPress *= 540764;   // Здесь мы получаем напряжение на PC1 умноженное на миллион вроде
+  
   vLongPress /= 100;
   vLongPress /= 11829;
   vLongPress *= 10000;
