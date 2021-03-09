@@ -19,18 +19,18 @@
 
 void measureBattery(void);
 void measurePressure(void);
-
-
+void DrawMenu(void);
+void DrawAir(void);
 
 char str[10];
 //uint8_t ch2 = 0b01010101;
-uint8_t Mode;
-uint8_t hour, min, sec, contrast;
-uint16_t sqw, Vbat, Pressure;
+int8_t Mode, CurrentModeLeft, menuItem;
+uint8_t hour, min, sec, rtc_temp;
+uint8_t contrast;
+uint16_t sqw, Vbat, Pressure, Temp;
 
 int main(void)
 {
-  Mode = M_MENU;
   DDRB  = 0b01101111;		//KeyRight, BT, SCK, MISO, MOSI, LCD_CSE, LCD_DC, LCD_RESET
   PORTB = 0b11000000;   // Подтяжка на геркон, BT(0-on/1-off), ,,,,,,
 	
@@ -56,114 +56,126 @@ int main(void)
   //rtc_set_date(28, 2, 21);
 	rtc_write(0x0E, 0b01000000);				// Запуск меандра 1 Гц
   
-  Vbat = 1111;
-  contrast = 127;
+  Mode = M_MENU;                      // Комп включается в режиме меню
+  CurrentModeLeft = MENU_MODE_TIME;   // Через MENU_MODE_TIME секунд бездействия комп выйдет из режима M_MENU
+  menuItem = MI_TimeH;                 // Выделенный пункт меню
 
-  lcd_init(LCD_DISP_ON);    // init lcd and turn on
+  lcd_init(LCD_DISP_ON);              // init lcd and turn on
+  contrast = 128;
   lcd_set_contrast(contrast);
-	/*
-	lcd_gotoxy(0, 0);
-	lcd_putsB(" 4.21m ");
-	lcd_gotoxy(0, 3);
-	lcd_putsB("  0:41 ");
-  */
-  //rtc_get_time(&hour, &min, &sec);
+  
+  rtc_get_time(&hour, &min, &sec);    // Прочитаем текущее время
+  
+  EIFR &= (0<<INT1);                  // Сбросим флаг преждевременного прерывания от клавы
   
 	sei();
 	
-  /* Replace with your application code */
-//  uint8_t contrast = 0;
   while (1) 
-  {/*
-    PORTB |= 0b01000000;
-    PORTC |= 0b00000001;
-    _delay_ms(2000);
-    PORTB &= 0b10111111;
-    PORTC &= 0b11111110;
-    _delay_ms(2000);
-    */
-    lcd_gotoxy(2, 3);
-    measureBattery();
-    itoa(Vbat, str, 10);
-    lcd_putsB(str);
-    
-    //lcd_putsB(" ");
-    
-  	lcd_charMode(DOUBLESIZE);
-    measurePressure();
-    itoa(Pressure, str, 10);
-    lcd_gotoxy(0, 0);
-    lcd_putsB(str);
-    lcd_putsB("KPa");
-    _delay_ms(50);
-
-/*    
-    lcd_set_contrast(contrast);
-    itoa((int)contrast, str, 10);
-    strcat(str, "   ");
-    lcd_gotoxy(0,2);          // set cursor to first column at line 3
-    lcd_puts(str);  // puts string form flash to display (TEXTMODE) or buffer (GRAPHICMODE)
-    _delay_ms(100);
-    contrast ++;
-*/
+  {
+    switch(Mode){
+      case M_MENU:{
+        DrawMenu();
+        break;
+      }
+      case M_AIR:{
+        DrawAir();
+        break;
+      }
+    }
   }
 }
 
 //--------------------------------------------------------------
-//10.8 28.3C
-//1:45
+
 ISR(INT0_vect)                    // Ежесекундное прерывание от RTC
 {
-  rtc_get_time(&hour, &min, &sec);
+  if(CurrentModeLeft > 0){
+    CurrentModeLeft --;
+    if (CurrentModeLeft == 0 && Mode == M_MENU)
+    {
+      Mode = M_AIR;
+      CurrentModeLeft = AIR_MODE_TIME;
+    }
+  }  
   
-  uint8_t t = rtc_read(0x11); // Чтение целой части температуры RTC
+  sec ++;
+  if (sec == 60)
+  {
+    rtc_get_time(&hour, &min, &sec); // Время из RTC читаем лишь раз в минуту для экономии
+  }
   
-	//sei();              // 
-	lcd_charMode(DOUBLESIZE);
-	lcd_gotoxy(0, 6);
-	lcd_putc('0' + hour/10);
-	lcd_putc('0' + hour%10);
-  lcd_putc(':');
-	lcd_putc('0' + min/10);
-	lcd_putc('0' + min%10);
-	lcd_putc(' ');
-	lcd_putc('0' + t/10);
-	lcd_putc('0' + t%10);
-	lcd_putc('C');
+  rtc_temp = rtc_read(0x11); // Чтение целой части температуры RTC
+  
+	sei();              // 
   
   if(sec%2 == 0)
     sensor_write(0x44);   // старт измерения температуры
   else{
-    uint16_t Temp = sensor_write(0xBE); // чтение температурных данных c dc18_B_20 / dc18_S_20
-    itoa(Temp/16, str, 10);
-  	lcd_gotoxy(0, 3);
-	  lcd_putsB(str);
-	  lcd_putsB("C ");
-  }        
+    Temp = sensor_write(0xBE); // чтение температурных данных c dc18_B_20 / dc18_S_20
+  }       
 	return;
 }
 //------------------------------------------------------------------------------
 
 ISR(INT1_vect)                  // Прерывание от кнопок
 {
-	lcd_gotoxy(0, 6);
-  lcd_puts("KEY ");
+  Mode = M_MENU;
+  CurrentModeLeft = MENU_MODE_TIME;
   if((PINB & 0b10000000) == 0)            // Key RIGHT
   {
-    lcd_puts("RIGHT");
+    menuItem ++;
+    if(menuItem == MI_Last) menuItem = MI_TimeH;
   }
   else if((PIND & 0b01000000) == 0)       // Key UP
   {
-    lcd_puts("UP");
+    switch(menuItem){
+      case MI_TimeH:{
+        hour ++;
+        if(hour > 23) hour = 0;
+        rtc_set_time(hour, min, 0);
+        break;
+      }
+      case MI_TimeM:{
+        min ++;
+        if(min > 59) min = 0;
+        rtc_set_time(hour, min, 0);
+        break;
+      }
+      case MI_Contrast:{
+        contrast += 8;
+        //if(contrast > 255) contrast = 0;
+        lcd_set_contrast(contrast);
+        break;
+      }
+    }
   }
   else if((PIND & 0b00100000) == 0)       // Key LEFT
   {
-    lcd_puts("LEFT");
+    menuItem --;
+    if(menuItem < 0) menuItem = MI_Last-1;
   }
   else                                // Key DOWN
   {
-    //itoa(PIND, str, 2);
-    lcd_puts("DOWN");
+    switch(menuItem){
+      case MI_TimeH:{
+        hour --;
+        if(hour > 23) hour = 23;
+        rtc_set_time(hour, min, 0);
+        break;
+      }
+      case MI_TimeM:{
+        min --;
+        if(min > 59) min = 59;
+        rtc_set_time(hour, min, 0);
+        break;
+      }
+      case MI_Contrast:{
+        contrast -= 8;
+        //if(contrast < 0) contrast = 255;
+        lcd_set_contrast(contrast);
+        break;
+      }
+    }
   }    
 	return;
 }
@@ -198,4 +210,64 @@ void measurePressure(void)
   vLongPress += 34779;
   Pressure = vLongPress/10000;
 }
+//---------------------------------------------------------------------
+void DrawMenu(void)
+{
+	lcd_charMode(DOUBLESIZE);
+	lcd_gotoxy(0, 0);
+  lcd_puts("Time");
+	lcd_putc(' ');
+  if(menuItem == MI_TimeH)lcd_inversMode(INVERS);
+	lcd_putc('0' + hour/10);
+	lcd_putc('0' + hour%10);
+  lcd_inversMode(NOINVERS);
+	lcd_putc(':');
+  if(menuItem == MI_TimeM)lcd_inversMode(INVERS);
+	lcd_putc('0' + min/10);
+	lcd_putc('0' + min%10);
+  lcd_inversMode(NOINVERS);
+	lcd_gotoxy(0, 2);
+  lcd_puts("Cntrst");
+	lcd_putc(' ');
+  if(menuItem == MI_Contrast)lcd_inversMode(INVERS);
+  itoa(contrast/8, str, 10);
+  lcd_puts(str);
+	lcd_putc(' ');
+  lcd_inversMode(NOINVERS);
+  
+}
+//---------------------------------------------------------------------
+void DrawAir(void)
+{
+  lcd_gotoxy(2, 3);
+  measureBattery();
+  itoa(Vbat, str, 10);
+  lcd_putsB(str);
+    
+  lcd_charMode(DOUBLESIZE);
+  measurePressure();
+  itoa(Pressure, str, 10);
+  lcd_gotoxy(0, 0);
+  lcd_putsB(str);
+  lcd_putsB("KPa ");
+  
+  lcd_charMode(DOUBLESIZE);
+  lcd_gotoxy(0, 6);
+  lcd_putc('0' + hour/10);
+  lcd_putc('0' + hour%10);
+  lcd_putc(':');
+  lcd_putc('0' + min/10);
+  lcd_putc('0' + min%10);
+  lcd_putc(' ');
+  lcd_putc('0' + rtc_temp/10);
+  lcd_putc('0' + rtc_temp%10);
+  lcd_putc('C');
+
+  itoa(Temp/16, str, 10);
+  lcd_gotoxy(0, 3);
+  lcd_putsB(str);
+  lcd_putsB("C ");
+
+}
+
 //---------------------------------------------------------------------

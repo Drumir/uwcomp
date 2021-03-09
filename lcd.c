@@ -56,6 +56,7 @@ static struct {
 } cursorPosition;
 
 static uint8_t charMode = NORMALSIZE;
+static uint8_t charInvers = NOINVERS;
 #if defined GRAPHICMODE
 #include <stdlib.h>
 static uint8_t displayBuffer[DISPLAY_HEIGHT/8][DISPLAY_WIDTH];
@@ -271,7 +272,8 @@ void lcd_putc(char c){
                 
                 for (uint8_t i=0; i < sizeof(FONT[0]); i++) {
                     doubleChar[i] = 0;
-                    dChar = pgm_read_byte(&(FONT[(uint8_t)c][i]));
+                    if(charInvers == NOINVERS) dChar = pgm_read_byte(&(FONT[(uint8_t)c][i]));
+                    else dChar = ~pgm_read_byte(&(FONT[(uint8_t)c][i]));
                     for (uint8_t j=0; j<8; j++) {
                         if ((dChar & (1 << j))) {
                             doubleChar[i] |= (1 << (j*2));
@@ -315,7 +317,9 @@ void lcd_putc(char c){
             	for (uint8_t i = 0; i < sizeof(FONT[0]); i++)
                 {
                     // print font to ram, print 6 columns
-                    data[i]=(pgm_read_byte(&(FONT[(uint8_t)c][i])));
+                    if(charInvers == NOINVERS) data[i]=(pgm_read_byte(&(FONT[(uint8_t)c][i])));
+                    else data[i]=~(pgm_read_byte(&(FONT[(uint8_t)c][i])));
+                    
                 }
                 lcd_data(data, sizeof(FONT[0]));
                 cursorPosition.x += sizeof(FONT[0]);
@@ -350,6 +354,9 @@ void lcd_putsB(const char* s){
 void lcd_charMode(uint8_t mode){
     charMode = mode;
 }
+void lcd_inversMode(uint8_t invers_mode){
+    charInvers = invers_mode;
+}  
 void lcd_puts(const char* s){
     while (*s) {
         lcd_putc(*s++);

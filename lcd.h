@@ -91,6 +91,8 @@ extern "C" {
 
 #define NORMALSIZE 1
 #define DOUBLESIZE 2
+#define NOINVERS   3
+#define INVERS     4
     
 #define LCD_DISP_OFF        0xAE
 #define LCD_DISP_ON        0xAF
@@ -123,6 +125,7 @@ extern "C" {
     void lcd_putc(char c);                // print character on screen at TEXTMODE
     // at GRAPHICMODE print character to buffer
     void lcd_charMode(uint8_t mode);            // set size of chars
+    void lcd_inversMode(uint8_t invers_mode);            // set inversion of chars
 		void lcd_putsB(const char* s);
 		void lcd_putcB(char c);
 #if defined GRAPHICMODE

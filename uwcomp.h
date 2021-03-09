@@ -9,10 +9,19 @@
 #ifndef UWCOMP_H_
 #define UWCOMP_H_
 
-#define M_MENU    0
-#define M_DEEP    1
-#define M_SURFACE 2
-#define M_AIR     3
+#define M_MENU    0   // Режим меню
+#define M_DEEP    1   // Режим нырка (глубже метра)
+#define M_SURFACE 2   // Режим отдыха на поверхности воды
+#define M_AIR     3   // Режим на воздухе. Определяется по давлению и по датчику воды
+#define M_SLEEP   4   // Режим сна
+
+#define MI_TimeH          0   // Выбранный пункт меню
+#define MI_TimeM          1
+#define MI_Contrast       2
+#define MI_Last           3
+
+#define MENU_MODE_TIME  6   // Через сколько секунд бездействия в режиме M_MENU комп перейдет в режим M_AIR
+#define AIR_MODE_TIME   30  // Через сколько секунд бездействия в режиме M_AIR комп перейдет в режим M_SLEEP
 
 
 
