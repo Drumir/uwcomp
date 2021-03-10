@@ -10,6 +10,7 @@
 #include <string.h>
 #include <avr/pgmspace.h>
 #include <avr/interrupt.h>
+#include <avr/sleep.h>
 #include "util/delay.h"
 #include "uwcomp.h"
 #include "font.h"
@@ -19,15 +20,23 @@
 
 void measureBattery(void);
 void measurePressure(void);
+void measurePressureInSleep(void);
 void DrawMenu(void);
 void DrawAir(void);
+void DrawDeep(void);
+void DrawSurface(void);
+void Sleep(void);
+uint16_t PressureToDepth(uint16_t p);   // Возвращает вычисленную по давлению глубину в сантиметрах
 
 char str[10];
 //uint8_t ch2 = 0b01010101;
 int8_t Mode, CurrentModeLeft, menuItem;
 uint8_t hour, min, sec, rtc_temp;
 uint8_t contrast;
-uint16_t sqw, Vbat, Pressure, Temp;
+uint16_t sqw, Vbat, Temp, Depth, Hold;
+uint16_t Pressure; // Давление в сотнях паскалей
+uint16_t PressArray[PRESS_ARRAY_LENGTH];
+uint8_t PressArrayCount;
 
 int main(void)
 {
@@ -38,7 +47,7 @@ int main(void)
 	PORTD = 0b01101000;			// 
   
   DDRC  = 0b00000001;   // ,,,,,,,5V
-	PORTC = 0b00000000;   //,,,,,,,5v(0-on/1-off)
+	PORTC = 0b00000000;   // ,,,,,,,5V(0-on/1-off)
   
   ACSR |= 0b10000000; // Выключим аналоговый компаратор
   
@@ -56,9 +65,11 @@ int main(void)
   //rtc_set_date(28, 2, 21);
 	rtc_write(0x0E, 0b01000000);				// Запуск меандра 1 Гц
   
-  Mode = M_MENU;                      // Комп включается в режиме меню
+  Mode = M_DEEP;                      // Комп включается в режиме меню
   CurrentModeLeft = MENU_MODE_TIME;   // Через MENU_MODE_TIME секунд бездействия комп выйдет из режима M_MENU
   menuItem = MI_TimeH;                 // Выделенный пункт меню
+  
+  PressArrayCount = 0;
 
   lcd_init(LCD_DISP_ON);              // init lcd and turn on
   contrast = 128;
@@ -66,6 +77,7 @@ int main(void)
   
   rtc_get_time(&hour, &min, &sec);    // Прочитаем текущее время
   
+  _delay_ms(500);
   EIFR &= (0<<INT1);                  // Сбросим флаг преждевременного прерывания от клавы
   
 	sei();
@@ -79,6 +91,18 @@ int main(void)
       }
       case M_AIR:{
         DrawAir();
+        break;
+      }
+      case M_DEEP:{
+        DrawDeep();
+        break;
+      }
+      case M_SURFACE:{
+        DrawSurface();
+        break;
+      }
+      case M_SLEEP:{
+        Sleep();
         break;
       }
     }
@@ -183,32 +207,57 @@ ISR(INT1_vect)                  // Прерывание от кнопок
 
 ISR(ADC_vect)          // Завершение преобразования АЦП
 {
-  //Vbat = ADC;		// Преобразуем условные единицы в вольты
-}
-//------------------------------------------------------------------------------
-void measureBattery(void)
-{
-  ADMUX  = 0b11000111;		  // 11 - Опорное напряжение = 1.1В, 0 - выравнивание вправо, 0 - резерв, 0 - резерв, 111 - выбор канала ADC7
-  ADCSRA |= 1<<ADSC;		    // Старт преобразования
-  while (ADCSRA & 0x40);		// Ждем завершения(сброса флага ADSC в 0)
-  uint32_t vLongBat = ADC;
-  vLongBat *= 1000;
-  Vbat = vLongBat / 2291;
+  MCUCR &= ~(1 << SE);  // Сбросим флаг готовности к спящему режиму
+  uint32_t vLongPress = ADC;
+  vLongPress *= 540764;   // Здесь мы получаем напряжение на PC1 умноженное на миллион вроде
+  
+  //vLongPress /= 100;
+  vLongPress /= 11829;
+  vLongPress *= 100;
+  vLongPress += 34779;
+  //PressArray[0] = vLongPress/1000;
+  
+  PressArray[PressArrayCount] = vLongPress/1000; // Получаем давление в сотнях паскалей
+  PressArrayCount ++; 
+  if(PressArrayCount == PRESS_ARRAY_LENGTH) PressArrayCount = 0;
 }
 //---------------------------------------------------------------------
-void measurePressure(void)
+void measurePressureInSleep(void)    // Измеряет давление в KPa
 {
+  ADMUX  = 0b11000001;		  // 11 - Опорное напряжение = 1.1В, 0 - выравнивание вправо, 0 - резерв, 0 - резерв, 001 - выбор канала ADC1
+  //         АЦП En,    not now,  single mode, reset iflag, INTs Enable,       предделитель частоты
+  ADCSRA = 1 << ADEN | 0 << ADSC | 0 << ADATE | 0 << ADIF | 1 << ADIE | 1 << ADPS2 | 1 << ADPS1 | 1 << ADPS0;
+  MCUCR |= 1 << SE | 0 << SM2 | 0 << SM1 | 1 << SM0;      // Разрешим переход в спящий режим. Выберем режим ADC Noise Reduction.
+  sleep_mode();
+}
+//---------------------------------------------------------------------
+void measurePressure(void)    // Измеряет давление в KPa
+{
+  //         АЦП En,    not now,  single mode, reset iflag, INTs Disable,       предделитель частоты
+  ADCSRA = 1 << ADEN | 0 << ADSC | 0 << ADATE | 0 << ADIF | 0 << ADIE | 1 << ADPS2 | 1 << ADPS1 | 1 << ADPS0;
   ADMUX  = 0b11000001;		  // 11 - Опорное напряжение = 1.1В, 0 - выравнивание вправо, 0 - резерв, 0 - резерв, 001 - выбор канала ADC1
   ADCSRA |= 1<<ADSC;		    // Старт преобразования
   while (ADCSRA & 0x40);		// Ждем завершения(сброса флага ADSC в 0)
   uint32_t vLongPress = ADC;
   vLongPress *= 540764;   // Здесь мы получаем напряжение на PC1 умноженное на миллион вроде
   
-  vLongPress /= 100;
+  //vLongPress /= 100;
   vLongPress /= 11829;
-  vLongPress *= 10000;
+  vLongPress *= 100;
   vLongPress += 34779;
-  Pressure = vLongPress/10000;
+  Pressure = vLongPress/1000;    
+}
+//------------------------------------------------------------------------------
+void measureBattery(void)
+{
+  //         АЦП En,    not now,  single mode, reset iflag, INTs Disable,       предделитель частоты
+  ADCSRA = 1 << ADEN | 0 << ADSC | 0 << ADATE | 0 << ADIF | 0 << ADIE | 1 << ADPS2 | 1 << ADPS1 | 1 << ADPS0;
+  ADMUX  = 0b11000111;		  // 11 - Опорное напряжение = 1.1В, 0 - выравнивание вправо, 0 - резерв, 0 - резерв, 111 - выбор канала ADC7
+  ADCSRA |= 1<<ADSC;		    // Старт преобразования
+  while (ADCSRA & 0x40);		// Ждем завершения(сброса флага ADSC в 0)
+  uint32_t vLongBat = ADC;
+  vLongBat *= 1000;
+  Vbat = vLongBat / 2291;
 }
 //---------------------------------------------------------------------
 void DrawMenu(void)
@@ -243,9 +292,12 @@ void DrawAir(void)
   measureBattery();
   itoa(Vbat, str, 10);
   lcd_putsB(str);
-    
+  
   lcd_charMode(DOUBLESIZE);
   measurePressure();
+  //for(uint8_t i = 0; i < PRESS_ARRAY_LENGTH; i ++)
+  //Pressure += PressArray[i];
+  //Pressure /= PRESS_ARRAY_LENGTH;
   itoa(Pressure, str, 10);
   lcd_gotoxy(0, 0);
   lcd_putsB(str);
@@ -270,4 +322,91 @@ void DrawAir(void)
 
 }
 
+//---------------------------------------------------------------------
+void DrawDeep(void)
+{
+  lcd_clrscr();
+  
+  lcd_gotoxy(0, 0);               // Отобразим задержку
+  if(Hold < 600) lcd_putcB('0');
+  itoa(Hold/60, str, 10);
+  lcd_putsB(str);
+  lcd_putcB(':');
+  if(Hold%60 < 10) lcd_putcB('0');
+  itoa(Hold%60, str, 10);
+  lcd_putsB(str);
+
+  lcd_gotoxy(0, 3);              // Отобразим глубину 
+  measurePressureInSleep();
+  Pressure = 0;
+  for(uint8_t i = 0; i < PRESS_ARRAY_LENGTH; i ++)
+    Pressure += PressArray[i];
+  Pressure /= PRESS_ARRAY_LENGTH;
+  Depth = PressureToDepth(Pressure);
+  itoa(Depth, str, 10);
+  if (Depth >= 1000 ){
+    lcd_putcB(str[0]);
+    lcd_putcB(str[1]);
+    lcd_putcB(',');
+    lcd_putsB(str+2);
+  }  
+  else if(Depth >= 100){
+      lcd_putcB('0');
+      lcd_putcB(str[0]);
+      lcd_putcB(',');
+      lcd_putsB(str+1);
+    }
+    else {
+      lcd_putcB('0');
+      lcd_putcB('0');
+      lcd_putcB(',');
+      lcd_putsB(str);
+      }
+  lcd_putcB('m');
+/*
+  measureBattery();
+  itoa(Vbat, str, 10);
+  lcd_putsB(str);
+  
+  lcd_charMode(DOUBLESIZE);
+  measurePressure();
+  itoa(Pressure, str, 10);
+  lcd_gotoxy(0, 0);
+  lcd_putsB(str);
+  lcd_putsB("KPa ");
+  
+  lcd_charMode(DOUBLESIZE);
+  lcd_gotoxy(0, 6);
+  lcd_putc('0' + hour/10);
+  lcd_putc('0' + hour%10);
+  lcd_putc(':');
+  lcd_putc('0' + min/10);
+  lcd_putc('0' + min%10);
+  lcd_putc(' ');
+  lcd_putc('0' + rtc_temp/10);
+  lcd_putc('0' + rtc_temp%10);
+  lcd_putc('C');
+
+  itoa(Temp/16, str, 10);
+  lcd_gotoxy(0, 3);
+  lcd_putsB(str);
+  lcd_putsB("C ");
+*/
+}
+//---------------------------------------------------------------------
+void DrawSurface(void)
+{
+  
+}
+//---------------------------------------------------------------------
+void Sleep(void)
+{
+  
+}
+
+//---------------------------------------------------------------------
+uint16_t PressureToDepth(uint16_t p)   // Возвращает вычисленную по давлению глубину в сантиметрах
+{
+  return p - 990;
+}
 //---------------------------------------------------------------------
