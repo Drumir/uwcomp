@@ -20,9 +20,9 @@
 #define MI_Contrast       2
 #define MI_Last           3
 
-#define MENU_MODE_TIME  6   // Через сколько секунд бездействия в режиме M_MENU комп перейдет в режим M_AIR
-#define AIR_MODE_TIME   30  // Через сколько секунд бездействия в режиме M_AIR комп перейдет в режим M_SLEEP
-#define PRESS_ARRAY_LENGTH  16  // Размер массива измерений давления 
+#define MENU_MODE_TIME  6       // Длительность режима M_MENU
+#define AIR_MODE_TIME   30      // Длительность режима M_AIR
+#define PRESS_ARRAY_LENGTH  32   // Размер массива измерений давления 
 
 
 

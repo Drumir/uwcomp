@@ -18,9 +18,10 @@
 #include "DS3231_twi.h"
 #include "DS18B20.h"
 
-void measureBattery(void);
-void measurePressure(void);
-void measurePressureInSleep(void);
+void measureBattery(void);            // Измеряет напряжение на аккумуляторе. Результат в Vbat
+void measurePressure(void);           // Измеряет мгновенное давление. Помещает результат в PressArray[PressArrayCount]
+void measurePressureInSleep(void);    // Запускает измерение мгновенного давления используя ADC noise reduction. результат обрабатывает ISR(ADC_vect)
+uint16_t GetAveragePressure(void);    // Возвращает среднее арехметическое давление по массиву PressArray[]
 void DrawMenu(void);
 void DrawAir(void);
 void DrawDeep(void);
@@ -30,7 +31,8 @@ uint16_t PressureToDepth(uint16_t p);   // Возвращает вычисленную по давлению гл
 
 char str[10];
 //uint8_t ch2 = 0b01010101;
-int8_t Mode, CurrentModeLeft, menuItem;
+int8_t Mode, menuItem;
+int16_t CurrentModeLeft;
 uint8_t hour, min, sec, rtc_temp;
 uint8_t contrast;
 uint16_t sqw, Vbat, Temp, Depth, Hold;
@@ -51,6 +53,8 @@ int main(void)
   
   ACSR |= 0b10000000; // Выключим аналоговый компаратор
   
+  DIDR0 |= 0b00000010;  // Отключим входной цифровой буфер на PC1 (ADC1) (на ADC6 и ADC7 цифровой буфер отсутствует)
+  
  	EICRA |= (1<<ISC01) | (0<<ISC00) | (1<<ISC11) | (0<<ISC10); // The rising edge of INT0 and INT1 generates an interrupt request
 	EIMSK |= (1<<INT0) | (1<<INT1); // INT0 Enable, INT1 Enable
 
@@ -66,24 +70,39 @@ int main(void)
 	rtc_write(0x0E, 0b01000000);				// Запуск меандра 1 Гц
   
   Mode = M_DEEP;                      // Комп включается в режиме меню
-  CurrentModeLeft = MENU_MODE_TIME;   // Через MENU_MODE_TIME секунд бездействия комп выйдет из режима M_MENU
-  menuItem = MI_TimeH;                 // Выделенный пункт меню
+  CurrentModeLeft = AIR_MODE_TIME;   // 
+  menuItem = MI_Contrast;             // Выделенный пункт меню
   
-  PressArrayCount = 0;
-
   lcd_init(LCD_DISP_ON);              // init lcd and turn on
   contrast = 128;
   lcd_set_contrast(contrast);
   
   rtc_get_time(&hour, &min, &sec);    // Прочитаем текущее время
   
-  _delay_ms(500);
-  EIFR &= (0<<INT1);                  // Сбросим флаг преждевременного прерывания от клавы
+  _delay_ms(300);
+  EIFR &= ~(0<<INT1);                  // Сбросим флаг преждевременного прерывания от клавы
+  
+  PressArrayCount = 0;
+  for(uint8_t i = 0; i < PRESS_ARRAY_LENGTH; i ++)
+    measurePressure();                  // Наполним массив измерений давления чтобы усредненное давление стало актуальным
   
 	sei();
 	
   while (1) 
   {
+    for(uint8_t i = 0; i < PRESS_ARRAY_LENGTH; i ++) measurePressure();
+    Pressure = GetAveragePressure();
+    measureBattery();
+    
+    if(Mode != M_DEEP && PressureToDepth(Pressure) > 99){
+      Mode = M_DEEP;
+      Hold = 0;
+    }
+
+    if(Mode != M_AIR && PressureToDepth(Pressure) <= 99){ // Здесь должен быть не M_AIR, а M_SURFACE
+      Mode = M_AIR;
+    }
+
     switch(Mode){
       case M_MENU:{
         DrawMenu();
@@ -113,14 +132,22 @@ int main(void)
 
 ISR(INT0_vect)                    // Ежесекундное прерывание от RTC
 {
-  if(CurrentModeLeft > 0){
-    CurrentModeLeft --;
-    if (CurrentModeLeft == 0 && Mode == M_MENU)
-    {
+  if(CurrentModeLeft == 0){
+    if(Mode == M_MENU){
       Mode = M_AIR;
       CurrentModeLeft = AIR_MODE_TIME;
     }
-  }  
+    if(Mode == M_AIR){
+      Mode = M_SLEEP; // Переход в спящий режим будет происходить в главном цикле (чтоб не в прерывании)
+      CurrentModeLeft = -1;
+    }
+  }    
+
+  if(CurrentModeLeft > 0)
+    CurrentModeLeft --;
+    
+  if(Mode == M_DEEP)
+    Hold ++;
   
   sec ++;
   if (sec == 60)
@@ -128,7 +155,7 @@ ISR(INT0_vect)                    // Ежесекундное прерывание от RTC
     rtc_get_time(&hour, &min, &sec); // Время из RTC читаем лишь раз в минуту для экономии
   }
   
-  rtc_temp = rtc_read(0x11); // Чтение целой части температуры RTC
+//  rtc_temp = rtc_read(0x11); // Чтение целой части температуры RTC
   
 	sei();              // 
   
@@ -207,7 +234,7 @@ ISR(INT1_vect)                  // Прерывание от кнопок
 
 ISR(ADC_vect)          // Завершение преобразования АЦП
 {
-  MCUCR &= ~(1 << SE);  // Сбросим флаг готовности к спящему режиму
+  SMCR &= ~(1 << SE);  // Сбросим флаг готовности к спящему режиму
   uint32_t vLongPress = ADC;
   vLongPress *= 540764;   // Здесь мы получаем напряжение на PC1 умноженное на миллион вроде
   
@@ -217,21 +244,22 @@ ISR(ADC_vect)          // Завершение преобразования АЦП
   vLongPress += 34779;
   //PressArray[0] = vLongPress/1000;
   
-  PressArray[PressArrayCount] = vLongPress/1000; // Получаем давление в сотнях паскалей
-  PressArrayCount ++; 
+  PressArrayCount ++;
   if(PressArrayCount == PRESS_ARRAY_LENGTH) PressArrayCount = 0;
+  PressArray[PressArrayCount] = vLongPress/1000; // Получаем давление в сотнях паскалей (hPa)
 }
 //---------------------------------------------------------------------
-void measurePressureInSleep(void)    // Измеряет давление в KPa
+void measurePressureInSleep(void)    // Измеряет давление в hPa
 {
   ADMUX  = 0b11000001;		  // 11 - Опорное напряжение = 1.1В, 0 - выравнивание вправо, 0 - резерв, 0 - резерв, 001 - выбор канала ADC1
   //         АЦП En,    not now,  single mode, reset iflag, INTs Enable,       предделитель частоты
   ADCSRA = 1 << ADEN | 0 << ADSC | 0 << ADATE | 0 << ADIF | 1 << ADIE | 1 << ADPS2 | 1 << ADPS1 | 1 << ADPS0;
-  MCUCR |= 1 << SE | 0 << SM2 | 0 << SM1 | 1 << SM0;      // Разрешим переход в спящий режим. Выберем режим ADC Noise Reduction.
+  SMCR |= 1 << SE | 0 << SM2 | 0 << SM1 | 1 << SM0;      // Разрешим переход в спящий режим. Выберем режим ADC Noise Reduction.
+
   sleep_mode();
 }
 //---------------------------------------------------------------------
-void measurePressure(void)    // Измеряет давление в KPa
+void measurePressure(void)    // Измеряет давление в hPa
 {
   //         АЦП En,    not now,  single mode, reset iflag, INTs Disable,       предделитель частоты
   ADCSRA = 1 << ADEN | 0 << ADSC | 0 << ADATE | 0 << ADIF | 0 << ADIE | 1 << ADPS2 | 1 << ADPS1 | 1 << ADPS0;
@@ -240,12 +268,12 @@ void measurePressure(void)    // Измеряет давление в KPa
   while (ADCSRA & 0x40);		// Ждем завершения(сброса флага ADSC в 0)
   uint32_t vLongPress = ADC;
   vLongPress *= 540764;   // Здесь мы получаем напряжение на PC1 умноженное на миллион вроде
-  
-  //vLongPress /= 100;
   vLongPress /= 11829;
   vLongPress *= 100;
   vLongPress += 34779;
-  Pressure = vLongPress/1000;    
+  PressArrayCount ++;
+  if(PressArrayCount == PRESS_ARRAY_LENGTH) PressArrayCount = 0;
+  PressArray[PressArrayCount] = vLongPress/1000; // Получаем давление в сотнях паскалей (hPa)
 }
 //------------------------------------------------------------------------------
 void measureBattery(void)
@@ -288,46 +316,39 @@ void DrawMenu(void)
 //---------------------------------------------------------------------
 void DrawAir(void)
 {
-  lcd_gotoxy(2, 3);
-  measureBattery();
-  itoa(Vbat, str, 10);
-  lcd_putsB(str);
-  
   lcd_charMode(DOUBLESIZE);
-  measurePressure();
-  //for(uint8_t i = 0; i < PRESS_ARRAY_LENGTH; i ++)
-  //Pressure += PressArray[i];
-  //Pressure /= PRESS_ARRAY_LENGTH;
-  itoa(Pressure, str, 10);
   lcd_gotoxy(0, 0);
+  itoa(Pressure, str, 10);
   lcd_putsB(str);
-  lcd_putsB("KPa ");
-  
-  lcd_charMode(DOUBLESIZE);
-  lcd_gotoxy(0, 6);
-  lcd_putc('0' + hour/10);
-  lcd_putc('0' + hour%10);
-  lcd_putc(':');
-  lcd_putc('0' + min/10);
-  lcd_putc('0' + min%10);
-  lcd_putc(' ');
-  lcd_putc('0' + rtc_temp/10);
-  lcd_putc('0' + rtc_temp%10);
-  lcd_putc('C');
+  lcd_putsB("hPa ");
 
   itoa(Temp/16, str, 10);
   lcd_gotoxy(0, 3);
   lcd_putsB(str);
   lcd_putsB("C ");
+  
+  lcd_charMode(NORMALSIZE);
+  lcd_gotoxy(0, 7);
+  lcd_putc('0' + hour/10);
+  lcd_putc('0' + hour%10);
+  lcd_putc(':');
+  lcd_putc('0' + min/10);
+  lcd_putc('0' + min%10);
+  lcd_putc(':');
+  lcd_putc('0' + sec/10);
+  lcd_putc('0' + sec%10);
+  lcd_putc(' ');
 
+  itoa(Vbat, str, 10);
+  lcd_puts(str);
+  lcd_putc('v');
 }
 
 //---------------------------------------------------------------------
 void DrawDeep(void)
 {
-  lcd_clrscr();
-  
   lcd_gotoxy(0, 0);               // Отобразим задержку
+  lcd_putcB('_');
   if(Hold < 600) lcd_putcB('0');
   itoa(Hold/60, str, 10);
   lcd_putsB(str);
@@ -335,78 +356,94 @@ void DrawDeep(void)
   if(Hold%60 < 10) lcd_putcB('0');
   itoa(Hold%60, str, 10);
   lcd_putsB(str);
+  lcd_putcB('_');
+
 
   lcd_gotoxy(0, 3);              // Отобразим глубину 
-  measurePressureInSleep();
-  Pressure = 0;
-  for(uint8_t i = 0; i < PRESS_ARRAY_LENGTH; i ++)
-    Pressure += PressArray[i];
-  Pressure /= PRESS_ARRAY_LENGTH;
   Depth = PressureToDepth(Pressure);
   itoa(Depth, str, 10);
   if (Depth >= 1000 ){
     lcd_putcB(str[0]);
     lcd_putcB(str[1]);
-    lcd_putcB(',');
+    lcd_putcB('.');
     lcd_putsB(str+2);
   }  
   else if(Depth >= 100){
       lcd_putcB('0');
       lcd_putcB(str[0]);
-      lcd_putcB(',');
+      lcd_putcB('.');
       lcd_putsB(str+1);
-    }
-    else {
+  }
+  else if(Depth >= 10){
       lcd_putcB('0');
       lcd_putcB('0');
-      lcd_putcB(',');
+      lcd_putcB('.');
       lcd_putsB(str);
-      }
-  lcd_putcB('m');
-/*
-  measureBattery();
-  itoa(Vbat, str, 10);
-  lcd_putsB(str);
-  
-  lcd_charMode(DOUBLESIZE);
-  measurePressure();
-  itoa(Pressure, str, 10);
-  lcd_gotoxy(0, 0);
-  lcd_putsB(str);
-  lcd_putsB("KPa ");
-  
-  lcd_charMode(DOUBLESIZE);
-  lcd_gotoxy(0, 6);
+  }
+  else{
+      lcd_putcB('0');
+      lcd_putcB('0');
+      lcd_putcB('.');
+      lcd_putcB('0');
+      lcd_putsB(str);
+  }
+  lcd_putsB("m ");
+
+  lcd_gotoxy(0, 7);
+  lcd_charMode(NORMALSIZE);   // Отобразим время
   lcd_putc('0' + hour/10);
   lcd_putc('0' + hour%10);
   lcd_putc(':');
   lcd_putc('0' + min/10);
   lcd_putc('0' + min%10);
-  lcd_putc(' ');
-  lcd_putc('0' + rtc_temp/10);
-  lcd_putc('0' + rtc_temp%10);
-  lcd_putc('C');
 
-  itoa(Temp/16, str, 10);
-  lcd_gotoxy(0, 3);
-  lcd_putsB(str);
-  lcd_putsB("C ");
-*/
+  lcd_charMode(DOUBLESIZE);
+  lcd_gotoxy(6, 6);
+  measureBattery();   // Отобразим заряд
+  itoa(Vbat, str, 10);
+  lcd_puts(str);
+  lcd_putc(' ');
+
+  itoa(Temp/16, str, 10); // Отобразим температуру
+  lcd_puts(str);
+  lcd_puts("C ");
+
 }
 //---------------------------------------------------------------------
 void DrawSurface(void)
 {
   
 }
+
 //---------------------------------------------------------------------
 void Sleep(void)
 {
-  
+  lcd_sleep(1);               // Отключим дисплей
+ 	rtc_write(0x0E, 0b00000000);				// Остановка меандра 1 Гц
+  EIMSK &= ~(1<<INT0); // Отключим INT0
+  sei();                // На всякий случай лишний раз разрешим прерывания
+  Mode = M_SLEEP;
+  SMCR |= 1 << SE | 0 << SM2 | 1 << SM1 | 0 << SM0;      // Разрешим переход в спящий режим. Выберем режим Power Down.
+  sleep_mode();
+
+  rtc_get_time(&hour, &min, &sec); // Актуализируем время
+  EIMSK |= 1<<INT0; // Включим прерывание от часов
+ 	rtc_write(0x0E, 0b01000000);				// Запустим меандра 1 Гц
+  lcd_sleep(0);               // Включим дисплей
 }
 
 //---------------------------------------------------------------------
 uint16_t PressureToDepth(uint16_t p)   // Возвращает вычисленную по давлению глубину в сантиметрах
 {
   return p - 990;
+}
+//---------------------------------------------------------------------
+uint16_t GetAveragePressure(void)
+{
+  uint32_t vLongPress = 0;
+  for(uint8_t i = 0; i < PRESS_ARRAY_LENGTH; i ++)
+  vLongPress += PressArray[i];
+  vLongPress /= PRESS_ARRAY_LENGTH;
+  return vLongPress;
 }
 //---------------------------------------------------------------------
