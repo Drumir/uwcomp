@@ -35,8 +35,9 @@ int8_t Mode, menuItem;
 int16_t CurrentModeLeft;
 uint8_t hour, min, sec, rtc_temp;
 uint8_t contrast;
-uint16_t sqw, Vbat, Temp, Depth, Hold;
+uint16_t sqw, Vbat, Temp, Depth, Hold, LastDepth, LastHold;  // Глубины в сантиметрах
 uint16_t Pressure; // Давление в сотнях паскалей
+uint16_t MinPressure; // Минимальное измеренное давленее (Примем его за атмосферное)
 uint16_t PressArray[PRESS_ARRAY_LENGTH];
 uint8_t PressArrayCount;
 
@@ -65,12 +66,14 @@ int main(void)
   ADMUX  = 0b11000111;		// 11 - Опорное напряжение = 1.1В, 0 - выравнивание вправо, 0 - резерв, 0 - резерв, 000 - выбор канала ADC7
   ADCSRA |= 1<<ADSC;		// Старт пробного мусорного преобразования
 
-  //rtc_set_time(21, 41, 6);
+  LastDepth = 0;
+	LastHold = 0;
+	//rtc_set_time(21, 41, 6);
   //rtc_set_date(28, 2, 21);
 	rtc_write(0x0E, 0b01000000);				// Запуск меандра 1 Гц
   
-  Mode = M_DEEP;                      // Комп включается в режиме меню
-  CurrentModeLeft = AIR_MODE_TIME;   // 
+  Mode = M_MENU;                      // Комп включается в режиме меню
+  CurrentModeLeft = MENU_MODE_TIME;   // 
   menuItem = MI_Contrast;             // Выделенный пункт меню
   
   lcd_init(LCD_DISP_ON);              // init lcd and turn on
@@ -85,6 +88,7 @@ int main(void)
   PressArrayCount = 0;
   for(uint8_t i = 0; i < PRESS_ARRAY_LENGTH; i ++)
     measurePressure();                  // Наполним массив измерений давления чтобы усредненное давление стало актуальным
+	MinPressure = 1100;
   
 	sei();
 	
@@ -92,15 +96,18 @@ int main(void)
   {
     for(uint8_t i = 0; i < PRESS_ARRAY_LENGTH; i ++) measurePressure();
     Pressure = GetAveragePressure();
+		if(Pressure < MinPressure) MinPressure = Pressure;
     measureBattery();
     
     if(Mode != M_DEEP && PressureToDepth(Pressure) > 99){
       Mode = M_DEEP;
       Hold = 0;
+			LastDepth = 0;
     }
 
-    if(Mode != M_AIR && PressureToDepth(Pressure) <= 99){ // Здесь должен быть не M_AIR, а M_SURFACE
+    if(Mode == M_DEEP && PressureToDepth(Pressure) <= 99){ // Здесь должен быть не M_AIR, а M_SURFACE
       Mode = M_AIR;
+			LastHold = Hold;
     }
 
     switch(Mode){
@@ -113,6 +120,7 @@ int main(void)
         break;
       }
       case M_DEEP:{
+				if (Depth > LastDepth) LastDepth = Depth;
         DrawDeep();
         break;
       }
@@ -138,7 +146,7 @@ ISR(INT0_vect)                    // Ежесекундное прерывание от RTC
       CurrentModeLeft = AIR_MODE_TIME;
     }
     if(Mode == M_AIR){
-      Mode = M_SLEEP; // Переход в спящий режим будет происходить в главном цикле (чтоб не в прерывании)
+      //Mode = M_SLEEP; // Переход в спящий режим будет происходить в главном цикле (чтоб не в прерывании)
       CurrentModeLeft = -1;
     }
   }    
@@ -221,10 +229,14 @@ ISR(INT1_vect)                  // Прерывание от кнопок
         break;
       }
       case MI_Contrast:{
-        contrast -= 8;
-        //if(contrast < 0) contrast = 255;
-        lcd_set_contrast(contrast);
-        break;
+	      contrast -= 8;
+	      //if(contrast < 0) contrast = 255;
+	      lcd_set_contrast(contrast);
+	      break;
+      }
+      case MI_ToSleep:{
+		  Mode = M_SLEEP;
+	      break;
       }
     }
   }    
@@ -311,32 +323,67 @@ void DrawMenu(void)
   lcd_puts(str);
 	lcd_putc(' ');
   lcd_inversMode(NOINVERS);
+	lcd_gotoxy(0, 4);
+  lcd_puts("Sleep");
+  lcd_putc(' ');
+  if(menuItem == MI_ToSleep)lcd_inversMode(INVERS);
+  lcd_puts(" NO");
+  lcd_inversMode(NOINVERS);
   
 }
 //---------------------------------------------------------------------
 void DrawAir(void)
 {
-  lcd_charMode(DOUBLESIZE);
-  lcd_gotoxy(0, 0);
-  itoa(Pressure, str, 10);
-  lcd_putsB(str);
-  lcd_putsB("hPa ");
+	lcd_charMode(DOUBLESIZE);
+  lcd_gotoxy(0, 0);               // Отобразим задержку предыдущего нырка
+  if(LastHold < 600) lcd_putc('0');
+  itoa(LastHold/60, str, 10);
+  lcd_puts(str);
+  lcd_putc(':');
+  if(LastHold%60 < 10) lcd_putc('0');
+  itoa(LastHold%60, str, 10);
+  lcd_puts(str);
+  lcd_putc(' ');
+	lcd_gotoxy(11, 0);
+
+	itoa(LastDepth, str, 10);			// Отобразим макс глубину предыдущего нырка
+	if (LastDepth >= 1000 ){
+		lcd_putc(str[0]);
+		lcd_putc(str[1]);
+		lcd_putc('.');
+		lcd_puts(str+2);
+	}
+	else if(LastDepth >= 100){
+		lcd_putc(str[0]);
+		lcd_putc('.');
+		lcd_puts(str+1);
+//	lcd_charMode(NORMALSIZE);
+	lcd_putc('m');
+//	lcd_charMode(DOUBLESIZE);
+	}
+	else{
+		lcd_putc('0');
+		lcd_putc('.');
+		lcd_puts(str);
+	}
+//	lcd_puts("m ");
+
 
   itoa(Temp/16, str, 10);
-  lcd_gotoxy(0, 3);
+  lcd_gotoxy(0, 2);
   lcd_putsB(str);
-  lcd_putsB("C ");
+  lcd_putsB("C    ");
+
+  lcd_gotoxy(0, 5);
+  lcd_puts("              ");
   
-  lcd_charMode(NORMALSIZE);
-  lcd_gotoxy(0, 7);
+  lcd_charMode(DOUBLESIZE);
+  lcd_gotoxy(0, 6);
   lcd_putc('0' + hour/10);
   lcd_putc('0' + hour%10);
   lcd_putc(':');
   lcd_putc('0' + min/10);
   lcd_putc('0' + min%10);
-  lcd_putc(':');
-  lcd_putc('0' + sec/10);
-  lcd_putc('0' + sec%10);
   lcd_putc(' ');
 
   itoa(Vbat, str, 10);
@@ -369,13 +416,13 @@ void DrawDeep(void)
     lcd_putsB(str+2);
   }  
   else if(Depth >= 100){
-      lcd_putcB('0');
+      lcd_putcB(' ');
       lcd_putcB(str[0]);
       lcd_putcB('.');
       lcd_putsB(str+1);
   }
   else if(Depth >= 10){
-      lcd_putcB('0');
+      lcd_putcB(' ');
       lcd_putcB('0');
       lcd_putcB('.');
       lcd_putsB(str);
@@ -389,21 +436,16 @@ void DrawDeep(void)
   }
   lcd_putsB("m ");
 
-  lcd_gotoxy(0, 7);
-  lcd_charMode(NORMALSIZE);   // Отобразим время
+  lcd_gotoxy(0, 6);
+  //lcd_charMode(NORMALSIZE);   // Отобразим время
   lcd_putc('0' + hour/10);
   lcd_putc('0' + hour%10);
   lcd_putc(':');
   lcd_putc('0' + min/10);
   lcd_putc('0' + min%10);
-
-  lcd_charMode(DOUBLESIZE);
-  lcd_gotoxy(6, 6);
-  measureBattery();   // Отобразим заряд
-  itoa(Vbat, str, 10);
-  lcd_puts(str);
   lcd_putc(' ');
 
+  //lcd_gotoxy(9, 6);
   itoa(Temp/16, str, 10); // Отобразим температуру
   lcd_puts(str);
   lcd_puts("C ");
@@ -418,24 +460,30 @@ void DrawSurface(void)
 //---------------------------------------------------------------------
 void Sleep(void)
 {
+  lcd_gotoxy(0, 4);
+  lcd_puts("Sleeping");
+	_delay_ms(1000);
+	
   lcd_sleep(1);               // Отключим дисплей
  	rtc_write(0x0E, 0b00000000);				// Остановка меандра 1 Гц
   EIMSK &= ~(1<<INT0); // Отключим INT0
   sei();                // На всякий случай лишний раз разрешим прерывания
-  Mode = M_SLEEP;
+  Mode = M_AIR;
   SMCR |= 1 << SE | 0 << SM2 | 1 << SM1 | 0 << SM0;      // Разрешим переход в спящий режим. Выберем режим Power Down.
   sleep_mode();
-
+  
+  _delay_ms(2000);
   rtc_get_time(&hour, &min, &sec); // Актуализируем время
   EIMSK |= 1<<INT0; // Включим прерывание от часов
  	rtc_write(0x0E, 0b01000000);				// Запустим меандра 1 Гц
   lcd_sleep(0);               // Включим дисплей
+	MinPressure = 1200;					// Выход из спящего режима сбрасывает опорное давлениеж
 }
 
 //---------------------------------------------------------------------
 uint16_t PressureToDepth(uint16_t p)   // Возвращает вычисленную по давлению глубину в сантиметрах
 {
-  return p - 990;
+  return p - MinPressure;
 }
 //---------------------------------------------------------------------
 uint16_t GetAveragePressure(void)

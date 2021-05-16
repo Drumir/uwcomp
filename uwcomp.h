@@ -18,7 +18,8 @@
 #define MI_TimeH          0   // Выбранный пункт меню
 #define MI_TimeM          1
 #define MI_Contrast       2
-#define MI_Last           3
+#define MI_ToSleep		  3
+#define MI_Last           4
 
 #define MENU_MODE_TIME  6       // Длительность режима M_MENU
 #define AIR_MODE_TIME   30      // Длительность режима M_AIR
