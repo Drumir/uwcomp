@@ -43,20 +43,20 @@ uint8_t PressArrayCount;
 
 int main(void)
 {
-  DDRB  = 0b01101111;		//KeyRight, BT, SCK, MISO, MOSI, LCD_CSE, LCD_DC, LCD_RESET
-  PORTB = 0b11000000;   // Подтяжка на геркон, BT(0-on/1-off), ,,,,,,
+	DDRB  = 0b01101111;		//KeyRight, BT, SCK, MISO, MOSI, LCD_CSE, LCD_DC, LCD_RESET
+	PORTB = 0b11000000;   // Подтяжка на геркон, BT(0-on/1-off), ,,,,,,
 	
-	DDRD  = 0b10000010;			// BTrst, KeyUp, KeyLeft, DS18B20, INT1(Keys), INT0, TX, RX
+	DDRD  = 0b10000011;			// BTrst, KeyUp, KeyLeft, DS18B20, INT1(Keys), INT0, TX, LED
 	PORTD = 0b01101000;			// 
   
-  DDRC  = 0b00000001;   // ,,,,,,,5V
+	DDRC  = 0b00000001;   // ,,,,,,,5V
 	PORTC = 0b00000000;   // ,,,,,,,5V(0-on/1-off)
   
-  ACSR |= 0b10000000; // Выключим аналоговый компаратор
+	ACSR |= 0b10000000; // Выключим аналоговый компаратор
   
-  DIDR0 |= 0b00000010;  // Отключим входной цифровой буфер на PC1 (ADC1) (на ADC6 и ADC7 цифровой буфер отсутствует)
+	DIDR0 |= 0b00000010;  // Отключим входной цифровой буфер на PC1 (ADC1) (на ADC6 и ADC7 цифровой буфер отсутствует)
   
- 	EICRA |= (1<<ISC01) | (0<<ISC00) | (1<<ISC11) | (0<<ISC10); // The rising edge of INT0 and INT1 generates an interrupt request
+	EICRA |= (1<<ISC01) | (0<<ISC00) | (1<<ISC11) | (0<<ISC10); // The rising edge of INT0 and INT1 generates an interrupt request
 	EIMSK |= (1<<INT0) | (1<<INT1); // INT0 Enable, INT1 Enable
 
   /* Инициализация АЦП */
@@ -167,10 +167,13 @@ ISR(INT0_vect)                    // Ежесекундное прерывание от RTC
   
 	sei();              // 
   
-  if(sec%2 == 0)
+  if(sec%2 == 0){
     sensor_write(0x44);   // старт измерения температуры
+		PORTD |= 0b00000001;			// Поморгаем светодиодом
+	}
   else{
     Temp = sensor_write(0xBE); // чтение температурных данных c dc18_B_20 / dc18_S_20
+		PORTD &= 0b11111110;			//
   }       
 	return;
 }
@@ -463,7 +466,7 @@ void Sleep(void)
   lcd_gotoxy(0, 4);
   lcd_puts("Sleeping");
 	_delay_ms(1000);
-	
+	PORTC |= 0x00000001;				// Отключим 5в преобразователь
   lcd_sleep(1);               // Отключим дисплей
  	rtc_write(0x0E, 0b00000000);				// Остановка меандра 1 Гц
   EIMSK &= ~(1<<INT0); // Отключим INT0
@@ -472,7 +475,8 @@ void Sleep(void)
   SMCR |= 1 << SE | 0 << SM2 | 1 << SM1 | 0 << SM0;      // Разрешим переход в спящий режим. Выберем режим Power Down.
   sleep_mode();
   
-  _delay_ms(2000);
+	PORTC &= 0x11111110;
+  _delay_ms(1000);
   rtc_get_time(&hour, &min, &sec); // Актуализируем время
   EIMSK |= 1<<INT0; // Включим прерывание от часов
  	rtc_write(0x0E, 0b01000000);				// Запустим меандра 1 Гц
